@@ -1,3 +1,161 @@
-<!doctype html><meta charset="utf-8">
-<title>HEY KAVA start</title>
-<a href="live-tracking.html">live-tracking へ</a> 
+<!doctype html><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>HEY KAVA – ETA / ルート</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root{--bg:#f7fbfb;--fg:#0b1f2a;--card:#fff;--acc:#0a84ff;}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:14px}
+  h1{font-size:1.2rem;margin:8px 0 12px}
+  .card{background:var(--card);border-radius:14px;padding:14px;box-shadow:0 6px 18px rgba(0,0,0,.06);margin:8px 0 12px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .pill{border:1px solid #e3eef2;border-radius:999px;padding:8px 14px;background:#fff}
+  .pill input[type="radio"]{margin-right:6px}
+  .btn{background:#fff;border:1px solid #dbe8ee;border-radius:12px;padding:8px 12px}
+  .btn.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+  .presets{display:flex;gap:8px;flex-wrap:wrap}
+  .preset{background:#fff;border:1px solid #dbe8ee;border-radius:999px;padding:8px 12px}
+  .preset.active{background:#e8f2ff;border-color:#b7d6ff}
+  .stat{font-weight:600}
+  #map{height:58vh;border-radius:14px;overflow:hidden}
+  .input{display:flex;gap:8px;align-items:center;background:#fff;border:1px solid #dbe8ee;border-radius:12px;padding:8px 10px;flex:1}
+  .input input{border:none;outline:none;font-size:16px;flex:1}
+  .help{font-size:.9rem;color:#5a7382}
+</style>
+
+<div class="wrap">
+  <div class="row">
+    <div class="pill">行き先 <span id="destLabel">（未設定）</span></div>
+    <div class="pill"><label><input type="radio" name="mode" value="foot">徒歩</label></div>
+    <div class="pill"><label><input type="radio" name="mode" value="driving" checked>車</label></div>
+    <button class="btn" id="locBtn">現在地ON</button>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div class="presets" id="presets"></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div class="input">
+        <input id="searchBox" placeholder="行き先を入力（例：川崎駅、スタバ 武蔵小杉）">
+        <button class="btn" id="searchBtn">検索</button>
+      </div>
+    </div>
+    <div class="help" style="margin-top:6px">プリセットをタップ、または上で住所/店名を入力→「検索」。</div>
+  </div>
+
+  <div class="row" style="margin:6px 0 10px">
+    距離：<span class="stat" id="dist">–</span> km　|　到着予測：<span class="stat" id="eta">–:–</span><span id="etaMin"></span>
+  </div>
+
+  <div id="map" class="card"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ====== 設定（プリセット名の編集はここ）====== */
+const PRESETS = [
+  { name:"家",       lat: 35.5306, lng: 139.7020 },
+  { name:"美容院",   lat: 35.6580, lng: 139.7010 },
+  { name:"ネイル",   lat: 35.6141, lng: 139.7280 },
+  { name:"みすず",   lat: 35.5988, lng: 139.7057 }
+];
+// ↑ 数値はお好みに。名前だけ変えるなら name を書き換え。
+
+/* ====== ここから本体 ====== */
+let you=null, dest=null, mode="driving";
+const $ = (s)=>document.querySelector(s);
+const map = L.map('map',{zoomControl:true}).setView([35.680,139.769], 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+
+const youIcon  = L.icon({iconUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+                          shadowUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'});
+const destIcon = L.divIcon({className:'', html:'<div style="width:18px;height:18px;background:#0a84ff;border:2px solid white;border-radius:50%"></div>'});
+let youMarker=null, destMarker=null, routeLine=null;
+
+/* プリセット描画 */
+const presetsEl = $("#presets");
+function renderPresets(){
+  presetsEl.innerHTML = "";
+  PRESETS.forEach(p=>{
+    const b = document.createElement("button");
+    b.className="preset";
+    b.textContent=p.name;
+    b.onclick=()=>{ setDestination(p); };
+    presetsEl.appendChild(b);
+  });
+}
+renderPresets();
+
+/* 現在地取得（起動時にも自動実行） */
+async function requestLocation(auto=false){
+  try{
+    await new Promise((res,rej)=>{
+      navigator.geolocation.getCurrentPosition(pos=>res(pos),err=>rej(err),{enableHighAccuracy:true,timeout:10000});
+    }).then(pos=>{
+      you = [pos.coords.latitude, pos.coords.longitude];
+      if(!youMarker){ youMarker=L.marker(you,{icon:youIcon}).addTo(map).bindPopup("あなたの現在地"); }
+      else { youMarker.setLatLng(you); }
+      if(!dest) map.setView(you, 14);
+      if(dest)  drawRoute();
+    });
+  }catch(e){
+    if(!auto) alert("位置情報が取得できませんでした。Safariの権限を確認してください。");
+  }
+}
+
+/* 行き先セット */
+function setDestination(p){
+  dest = [p.lat, p.lng];
+  $("#destLabel").textContent = p.name;
+  if(!destMarker){ destMarker=L.marker(dest,{icon:destIcon}).addTo(map).bindPopup("行き先："+p.name); }
+  else { destMarker.setLatLng(dest).getPopup()?.setContent("行き先："+p.name); }
+  if(you){ drawRoute(); } else { map.setView(dest, 14); }
+}
+
+/* ルート描画 & ETA */
+async function drawRoute(){
+  if(!you || !dest) return;
+  const profile = mode; // "driving" or "foot"
+  const url = `https://router.project-osrm.org/route/v1/${profile}/${you[1]},${you[0]};${dest[1]},${dest[0]}?overview=full&geometries=geojson`;
+  const r = await fetch(url).then(r=>r.json()).catch(()=>null);
+  if(!r || !r.routes || !r.routes[0]) return;
+
+  const {distance, duration, geometry} = r.routes[0];
+  const km = (distance/1000).toFixed(2);
+  $("#dist").textContent = km;
+
+  const now = new Date();
+  const etaDate = new Date(now.getTime() + duration*1000);
+  const hh = String(etaDate.getHours()).padStart(2,"0");
+  const mm = String(etaDate.getMinutes()).padStart(2,"0");
+  $("#eta").textContent = `${hh}:${mm}`;
+  $("#etaMin").textContent = `（約${Math.round(duration/60)}分）`;
+
+  if(routeLine) map.removeLayer(routeLine);
+  routeLine = L.geoJSON(geometry,{style:{color:"#0a84ff",weight:5}}).addTo(map);
+  const bounds = L.latLngBounds([you, dest]);
+  map.fitBounds(bounds.pad(0.25));
+}
+
+/* 手入力検索（Nominatim） */
+async function geocodeAndSet(){
+  const q = $("#searchBox").value.trim();
+  if(!q) return;
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
+  const data = await fetch(url,{headers:{'Accept':'application/json'}}).then(r=>r.json()).catch(()=>null);
+  if(!data || !data[0]){ alert("見つかりませんでした"); return; }
+  const {lat,lon,display_name} = data[0];
+  setDestination({name: display_name.split(",")[0], lat: parseFloat(lat), lng: parseFloat(lon)});
+}
+
+/* UIイベント */
+$("#locBtn").onclick = ()=>requestLocation(false);
+$("#searchBtn").onclick = geocodeAndSet;
+document.querySelectorAll('input[name="mode"]').forEach(r=>{
+  r.addEventListener('change', (e)=>{ mode = e.target.value; if(you && dest) drawRoute(); });
+});
+
+/* 起動時：自動で現在地取得（初回は許可ダイアログが出ます） */
+window.addEventListener('load', ()=> requestLocation(true));
+</script>
