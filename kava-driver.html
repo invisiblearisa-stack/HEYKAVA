@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAVA Driver</title>
+<body>
+<h2>位置を送信中…（このページは運転手専用）</h2>
+<p id="status">初期化中</p>
+
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js';
+  import { getDatabase, ref, set } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js';
+
+  /* ▼▼▼ ここを Firebase 画面に出ているあなたの config で置き換える ▼▼▼ */
+  const firebaseConfig = {
+    /* const firebaseConfig = { … } の「{ … }」中身をそのまま貼る */
+  };
+  /* ▲▲▲ ここまで差し替え ▲▲▲ */
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+  const DRIVER_ID = 'kava'; // ドライバー識別子（必要なら別名に）
+
+  function post(pos) {
+    const data = {
+      lat: pos.coords.latitude,
+      lng: pos.coords.longitude,
+      acc: pos.coords.accuracy,
+      ts : Date.now()
+    };
+    set(ref(db, `drivers/${DRIVER_ID}`), data);
+    const s = document.getElementById('status');
+    s.textContent = `${new Date().toLocaleTimeString()} 送信: ${data.lat.toFixed(5)}, ${data.lng.toFixed(5)} ±${Math.round(data.acc)}m`;
+  }
+  function onErr(err){ document.getElementById('status').textContent = '位置取得エラー: ' + err.message; }
+
+  if ('geolocation' in navigator){
+    navigator.geolocation.watchPosition(post, onErr, { enableHighAccuracy:true, maximumAge:0, timeout:10000 });
+  }else{
+    document.getElementById('status').textContent = 'この端末では位置情報が使えません';
+  }
+</script>
+</body>
+</html>
