@@ -1,3 +1,102 @@
-<!doctype html><meta charset="utf-8">
-<title>HEY KAVA tracking</title>
-<p>ここが追跡ページです。</p>
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HEY KAVA – ライブ追跡</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif}
+.header{padding:10px 12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+select,button,label{font-size:16px} button{padding:8px 12px;border-radius:10px;border:1px solid #ccc;background:#fff}
+#map{height:65vh} .pill{background:#f5f5f7;border-radius:999px;padding:6px 10px}
+#eta{font-weight:700}
+</style>
+</head><body>
+<div class="header">
+  <div class="row">
+    <span class="pill">行き先</span>
+    <select id="dest">
+      <option value="home">家</option>
+      <option value="salon">美容院</option>
+      <option value="nail">ネイル</option>
+      <option value="misuzu">みすず（ちいの親友の家）</option>
+    </select>
+    <label class="pill"><input type="radio" name="mode" value="walk" checked> 徒歩</label>
+    <label class="pill"><input type="radio" name="mode" value="car"> 車</label>
+    <button id="go">現在地ON</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <span>距離：<span id="dist">–</span> km　|　到着予測：<span id="eta">–</span></span>
+  </div>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ★座標はダミー（東京駅付近）。後で実際の緯度経度に置き換えてね。
+const PLACES = {
+  home:{lat:35.681236,lng:139.767125},
+  salon:{lat:35.681236,lng:139.767125},
+  nail:{lat:35.681236,lng:139.767125},
+  misuzu:{lat:35.681236,lng:139.767125}
+};
+const map = L.map('map',{zoomControl:true}).setView([35.681236,139.767125],14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+
+let meMarker=null, destMarker=null, line=null, watchId=null;
+const $ = (id)=>document.getElementById(id);
+const destSel = $('dest'), distEl=$('dist'), etaEl=$('eta');
+
+function setDest(){
+  const p = PLACES[destSel.value];
+  if(!p) return;
+  if(destMarker){destMarker.remove();}
+  destMarker = L.marker([p.lat,p.lng],{title:'目的地'}).addTo(map);
+  if(meMarker){drawLineAndETA();}
+  else{map.setView([p.lat,p.lng],14);}
+}
+function toRad(x){return x*Math.PI/180;}
+function haversine(a,b){
+  const R=6371;
+  const dLat=toRad(b.lat-a.lat), dLng=toRad(b.lng-a.lng);
+  const s1=Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s1));
+}
+function drawLineAndETA(){
+  if(!(meMarker&&destMarker)) return;
+  const a=meMarker.getLatLng(), b=destMarker.getLatLng();
+  const d = haversine({lat:a.lat,lng:a.lng},{lat:b.lat,lng:b.lng}); // 直線距離km
+  distEl.textContent = d.toFixed(2);
+  // 徒歩4.5km/h、車30km/h（ざっくり）
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  const speed = (mode==='walk')?4.5:30;
+  const min = Math.ceil((d/speed)*60)+ (mode==='car'?5:0); // 車は+5分マージン
+  const now = new Date(); now.setMinutes(now.getMinutes()+min);
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  etaEl.textContent = `${hh}:${mm}（約${min}分）`;
+  if(line){line.remove();}
+  line = L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#0b5',weight:4,opacity:0.7}).addTo(map);
+  map.fitBounds(line.getBounds(),{padding:[40,40]});
+}
+
+$('go').onclick = ()=>{
+  if(!navigator.geolocation){alert('位置情報が使えません');return;}
+  if(watchId){navigator.geolocation.clearWatch(watchId);watchId=null;}
+  watchId = navigator.geolocation.watchPosition(pos=>{
+    const {latitude,longitude} = pos.coords;
+    if(!meMarker){
+      meMarker = L.marker([latitude,longitude],{title:'あなた'}).addTo(map);
+    }else{
+      meMarker.setLatLng([latitude,longitude]);
+    }
+    drawLineAndETA();
+  }, err=>{
+    alert('位置情報エラー: '+err.message);
+  }, {enableHighAccuracy:true, maximumAge:5000, timeout:15000});
+};
+
+destSel.onchange = setDest;
+document.querySelectorAll('input[name="mode"]').forEach(r=>r.onchange=drawLineAndETA);
+setDest();
+</script>
+</body></html>
