@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>HEY KAVA (GO風)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif}
+  header{padding:10px 12px;border-bottom:1px solid #eee;display:flex;gap:8px;align-items:center}
+  #map{height:70vh}
+  button{padding:10px 14px;border-radius:8px;border:1px solid #ccc;background:#fff}
+  .primary{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
+  .pill{padding:8px 12px;border-radius:999px}
+  #status{font-size:12px;color:#555;margin-left:auto}
+</style>
+<div id="app">
+  <header>
+    <button id="start" class="primary pill">ヘイカバする</button>
+    <span id="status">準備OK</span>
+  </header>
+  <div id="map"></div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+  import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+  /* ====== ここを“あなたの” Firebase Configで置き換え ====== */
+  const firebaseConfig = {
+    // Firebaseコンソール → ウェブアプリ（</>）→ SDKの設定と構成 → Config
+    // に表示される「const firebaseConfig = {...}」の { ... } を丸ごと貼る
+  };
+  /* ====== 置き換えここまで ====== */
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // Leaflet 読み込み
+  const Llink = document.createElement('script');
+  Llink.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+  document.body.appendChild(Llink);
+
+  let map, meMarker, kavaMarker;
+
+  function initMap(lat=35.681, lng=139.767){
+    map = L.map('map').setView([lat, lng], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+  }
+
+  function setMe(lat,lng){
+    if(!map) initMap(lat,lng);
+    if(meMarker){ meMarker.setLatLng([lat,lng]); }
+    else{
+      meMarker = L.marker([lat,lng], {title:"あなた"}).addTo(map);
+    }
+  }
+
+  function setKava(lat,lng){
+    if(!map) initMap(lat,lng);
+    if(kavaMarker){ kavaMarker.setLatLng([lat,lng]); }
+    else{
+      const blue = L.icon({iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+        iconSize:[25,41],iconAnchor:[12,41],popupAnchor:[1,-34]});
+      kavaMarker = L.marker([lat,lng], {icon:blue, title:"カバ"}).addTo(map).bindPopup("カバの現在地");
+    }
+  }
+
+  async function start(){
+    const s = document.querySelector('#status');
+    s.textContent = "現在地を取得中…";
+    // あなたの現在地
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(
+        p=>{ setMe(p.coords.latitude, p.coords.longitude); s.textContent="カバの位置を取得中…"; },
+        _=>{ initMap(); s.textContent="位置の許可が必要です（マップ初期化のみ表示）"; }
+      );
+    }else{
+      initMap(); s.textContent="この端末は位置情報に未対応";
+    }
+    // カバの位置（Firebase: /drivers/kava を監視）
+    const kavaRef = ref(db, "drivers/kava");
+    onValue(kavaRef, snap=>{
+      const v = snap.val();
+      if(v && v.latitude && v.longitude){
+        setKava(v.latitude, v.longitude);
+        document.querySelector('#status').textContent = `カバ更新: ${new Date(v.updatedAt||Date.now()).toLocaleTimeString()}`;
+      }else{
+        document.querySelector('#status').textContent = "カバの位置がまだありません";
+      }
+    });
+  }
+
+  document.querySelector('#start').onclick = start;
+</script>
