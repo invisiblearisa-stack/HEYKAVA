@@ -1,0 +1,46 @@
+<!doctype html><meta charset="utf-8"><title>KAVA Driver</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:sans-serif;padding:16px}button{font-size:18px;padding:10px 14px}#log{white-space:pre-wrap;font-size:14px;color:#555}</style>
+<h1>カバ（運転手）送信</h1>
+<p>このページを開いたままにすると、あなたの現在地が Firebase に送信されます。</p>
+<button id="start">位置送信を開始</button>
+<button id="stop" disabled>停止</button>
+<p id="status">待機中</p>
+<pre id="log"></pre>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import { getDatabase, ref, set, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+const firebaseConfig = {/* ←ここに Config をそのまま貼り付け */};
+
+const app = initializeApp(firebaseConfig);
+const db  = getDatabase(app);
+const path = ref(db, "drivers/kava");
+
+let watchId = null;
+
+function write(lat,lng){
+  set(path, { lat, lng, updatedAt: serverTimestamp(), status: "online" });
+}
+onDisconnect(path).set({status:"offline", updatedAt: serverTimestamp()});
+
+const $ = s=>document.querySelector(s);
+$("#start").onclick = () => {
+  $("#start").disabled = true; $("#stop").disabled = false;
+  $("#status").textContent = "送信中… 位置の許可を出してください";
+  if(!navigator.geolocation){ $("#status").textContent="位置情報に未対応"; return;}
+  watchId = navigator.geolocation.watchPosition(p=>{
+    const {latitude, longitude, accuracy}=p.coords;
+    write(latitude, longitude);
+    $("#status").textContent = `送信中：${latitude.toFixed(5)}, ${longitude.toFixed(5)} ±${Math.round(accuracy)}m`;
+  }, err=>{
+    $("#status").textContent = "エラー: " + err.message;
+  }, {enableHighAccuracy:true, maximumAge:0, timeout:10000});
+};
+$("#stop").onclick = ()=>{
+  if(watchId!==null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+  $("#start").disabled=false; $("#stop").disabled=true;
+  $("#status").textContent="停止しました";
+};
+</script>
