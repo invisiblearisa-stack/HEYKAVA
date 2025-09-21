@@ -4,92 +4,148 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif}
-  header{padding:10px 12px;border-bottom:1px solid #eee;display:flex;gap:8px;align-items:center}
-  #map{height:70vh}
-  button{padding:10px 14px;border-radius:8px;border:1px solid #ccc;background:#fff}
-  .primary{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
-  .pill{padding:8px 12px;border-radius:999px}
+  :root{--brand:#0ea5e9}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif}
+  header{padding:10px 12px;border-bottom:1px solid #eee;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #map{height:68vh}
+  input,button{padding:10px 12px;border-radius:10px;border:1px solid #d0d7de;font-size:16px}
+  button.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .pill{background:#f5f7f9;border-radius:999px;padding:6px 10px;display:inline-block;margin-right:6px}
   #status{font-size:12px;color:#555;margin-left:auto}
+  #info{padding:10px;border-top:1px solid #eee}
+  .price{font-weight:700}
 </style>
-<div id="app">
-  <header>
-    <button id="start" class="primary pill">ヘイカバする</button>
-    <span id="status">準備OK</span>
-  </header>
-  <div id="map"></div>
+
+<header>
+  <button id="start" class="primary">ヘイカバする</button>
+  <input id="dest" placeholder="行き先（住所／施設名）" style="flex:1;min-width:180px">
+  <input id="arrive" type="time" title="到着したい時刻">
+  <button id="quote">見積り</button>
+  <button id="confirm" class="primary" disabled>ヘイカバ確定</button>
+  <span id="status">準備OK</span>
+</header>
+
+<div id="map"></div>
+
+<div id="info">
+  <span class="pill">距離: <span id="dist">-</span> km</span>
+  <span class="pill">所要: <span id="dur">-</span></span>
+  <span class="pill">タクシー予測: <span id="taxi" class="price">-</span> 円</span>
+  <span class="pill">HEY KAVA: <span id="kava" class="price">-</span> 円</span>
+  <div id="etaLine" style="margin-top:6px;"></div>
 </div>
 
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+  import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
   import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
-  /* ====== ここを“あなたの” Firebase Configで置き換え ====== */
+  // ★ あなたの Firebase 設定（編集不要）
   const firebaseConfig = {
-    // Firebaseコンソール → ウェブアプリ（</>）→ SDKの設定と構成 → Config
-    // に表示される「const firebaseConfig = {...}」の { ... } を丸ごと貼る
+    apiKey: "AIzaSyDqOdymSye5r4D9HeULVBhmqX_ec9eV3Ck",
+    authDomain: "hey-kava-d50cd.firebaseapp.com",
+    databaseURL: "https://hey-kava-d50cd-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "hey-kava-d50cd",
+    storageBucket: "hey-kava-d50cd.firebasestorage.app",
+    messagingSenderId: "835868149615",
+    appId: "1:835868149615:web:8bc9130d21170abffaca9a"
   };
-  /* ====== 置き換えここまで ====== */
 
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
+  const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
 
-  // Leaflet 読み込み
-  const Llink = document.createElement('script');
-  Llink.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-  document.body.appendChild(Llink);
+  // Leaflet
+  const Ls = document.createElement('script');
+  Ls.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+  document.body.appendChild(Ls);
+  await new Promise(r => Ls.onload = r);
 
-  let map, meMarker, kavaMarker;
+  const map = L.map('map'); 
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
 
-  function initMap(lat=35.681, lng=139.767){
-    map = L.map('map').setView([lat, lng], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, attribution: '&copy; OpenStreetMap'
-    }).addTo(map);
+  let me=null, meMarker=null, dest=null, destMarker=null, routeLayer=null, kavaMarker=null;
+
+  const $ = s => document.querySelector(s);
+  const setStatus = t => $("#status").textContent = t;
+  const fmtTime = (sec)=>{ const m=Math.round(sec/60); return (m>=60?`${Math.floor(m/60)}時間`:"")+`${m%60}分`; };
+
+  // 現在地取得
+  $("#start").onclick = ()=>{
+    setStatus("現在地を取得中…");
+    if (!navigator.geolocation){ setStatus("位置情報が使えません"); return; }
+    navigator.geolocation.getCurrentPosition(p=>{
+      me = {lat:p.coords.latitude, lng:p.coords.longitude};
+      if(!meMarker) meMarker = L.marker([me.lat,me.lng],{title:"あなた"}).addTo(map);
+      meMarker.setLatLng([me.lat,me.lng]);
+      map.setView([me.lat,me.lng], 14);
+      setStatus("カバの位置を表示できます。行き先を入力して『見積り』へ");
+    }, e=> setStatus("位置取得エラー: "+e.message), {enableHighAccuracy:true,timeout:10000});
+  };
+
+  // 行き先ジオコーディング
+  async function geocode(q){
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=ja&q=${encodeURIComponent(q)}`;
+    const r = await fetch(url); const j = await r.json();
+    if(!j.length) throw new Error("行き先が見つかりません");
+    return {lat:+j[0].lat, lng:+j[0].lon, label:j[0].display_name};
   }
 
-  function setMe(lat,lng){
-    if(!map) initMap(lat,lng);
-    if(meMarker){ meMarker.setLatLng([lat,lng]); }
-    else{
-      meMarker = L.marker([lat,lng], {title:"あなた"}).addTo(map);
+  // 経路＆所要（OSRM）
+  async function route(a,b){
+    const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`;
+    try{
+      const r = await fetch(url); const j = await r.json();
+      const r0 = j.routes?.[0]; if(!r0) throw 0;
+      if(routeLayer) routeLayer.remove();
+      routeLayer = L.geoJSON(r0.geometry).addTo(map);
+      map.fitBounds(routeLayer.getBounds(), {padding:[30,30]});
+      return {km:r0.distance/1000, sec:r0.duration};
+    }catch{
+      // 失敗時はハーバサイン＋30km/h仮
+      const km = haversine(a.lat,a.lng,b.lat,b.lng);
+      if(routeLayer) routeLayer.remove();
+      return {km, sec: km/30*3600};
     }
   }
-
-  function setKava(lat,lng){
-    if(!map) initMap(lat,lng);
-    if(kavaMarker){ kavaMarker.setLatLng([lat,lng]); }
-    else{
-      const blue = L.icon({iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        iconSize:[25,41],iconAnchor:[12,41],popupAnchor:[1,-34]});
-      kavaMarker = L.marker([lat,lng], {icon:blue, title:"カバ"}).addTo(map).bindPopup("カバの現在地");
-    }
+  function haversine(aLat,aLng,bLat,bLng){
+    const R=6371,toRad=x=>x*Math.PI/180;
+    const dLat=toRad(bLat-aLat), dLng=toRad(bLng-aLng);
+    const s=Math.sin(dLat/2)**2 + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLng/2)**2;
+    return 2*R*Math.asin(Math.sqrt(s));
   }
 
-  async function start(){
-    const s = document.querySelector('#status');
-    s.textContent = "現在地を取得中…";
-    // あなたの現在地
-    if(navigator.geolocation){
-      navigator.geolocation.getCurrentPosition(
-        p=>{ setMe(p.coords.latitude, p.coords.longitude); s.textContent="カバの位置を取得中…"; },
-        _=>{ initMap(); s.textContent="位置の許可が必要です（マップ初期化のみ表示）"; }
-      );
-    }else{
-      initMap(); s.textContent="この端末は位置情報に未対応";
-    }
-    // カバの位置（Firebase: /drivers/kava を監視）
-    const kavaRef = ref(db, "drivers/kava");
-    onValue(kavaRef, snap=>{
-      const v = snap.val();
-      if(v && v.latitude && v.longitude){
-        setKava(v.latitude, v.longitude);
-        document.querySelector('#status').textContent = `カバ更新: ${new Date(v.updatedAt||Date.now()).toLocaleTimeString()}`;
+  // 見積り
+  $("#quote").onclick = async ()=>{
+    try{
+      if(!me) throw new Error("まず『ヘイカバする』で現在地を取得してください");
+      const q = $("#dest").value.trim(); if(!q) throw new Error("行き先を入力してください");
+      dest = await geocode(q);
+      if(!destMarker) destMarker = L.marker([dest.lat,dest.lng],{title:"行き先"}).addTo(map);
+      destMarker.setLatLng([dest.lat,dest.lng]).bindPopup(q).openPopup();
+
+      const r = await route(me, dest);
+      const taxi = Math.round(500 + r.km*300 + Math.max(0,(r.sec/60-10))*40); // 仮: 初乗り500 + 1km=¥300 + 超過1分=¥40
+      const kava = Math.max(300, Math.round(taxi*0.5)); // HEY KAVA = 半額（最低¥300）
+
+      $("#dist").textContent = r.km.toFixed(2);
+      $("#dur").textContent  = fmtTime(r.sec);
+      $("#taxi").textContent = taxi.toLocaleString();
+      $("#kava").textContent = kava.toLocaleString();
+
+      const t = $("#arrive").value;
+      if(t){
+        const now=new Date(); const [hh,mm]=t.split(":").map(Number);
+        const wish=new Date(now); wish.setHours(hh,mm,0,0);
+        const eta = new Date(now.getTime()+r.sec*1000);
+        const ok = eta <= wish;
+        $("#etaLine").textContent = `到着予測 ${eta.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}（希望 ${t}）${ok?" ✅間に合いそう":" ⚠︎遅れる見込み"}`;
       }else{
-        document.querySelector('#status').textContent = "カバの位置がまだありません";
+        $("#etaLine").textContent = "";
       }
-    });
-  }
 
-  document.querySelector('#start').onclick = start;
+      $("#confirm").disabled = false;
+      setStatus("見積り完了。『ヘイカバ確定』でカバ追跡へ");
+    }catch(e){ alert(e.message||e); }
+  };
+
+  // ※ 追跡（リアルタイム位置/ETA）は 手順3 で実装
 </script>
