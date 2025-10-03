@@ -1,88 +1,152 @@
-<!doctype html>
+　<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HEY KAVA – ワンタップETA</title>
-  <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;line-height:1.6}
-    input,button{font-size:16px;padding:10px;border:1px solid #ccc;border-radius:10px}
-    button{cursor:pointer}
-    .row{display:flex;gap:8px;flex-wrap:wrap}
-    #linkBox{margin-top:12px;padding:12px;background:#f6f6f6;border-radius:10px;word-break:break-all}
-    small{color:#666}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>HEY KAVA</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512'><rect width='512' height='512' fill='%2300A3FF'/><text x='50%' y='55%' font-size='220' text-anchor='middle' fill='white' font-family='Arial'>K</text></svg>">
+<style>
+:root { --bg:#0b0f14; --card:#121821; --text:#eaf1ff; --muted:#9bb4d1; --accent:#2ea7ff; --ok:#00d48a; }
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Helvetica Neue","Segoe UI",Roboto,system-ui,sans-serif;}
+.wrap{max-width:760px;margin:0 auto;padding:18px}
+h1{font-size:22px;margin:6px 0 12px}
+.card{background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px;margin:12px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.btn{flex:1 1 220px;display:flex;align-items:center;justify-content:center;padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0f1520;color:var(--text);text-decoration:none;font-weight:600}
+.btn:active{transform:scale(.98)}
+.kpill{display:inline-block;padding:2px 8px;border-radius:999px;background:rgba(46,167,255,.15);color:#bfe3ff;border:1px solid rgba(46,167,255,.35);font-size:12px}
+.small{font-size:12px;color:var(--muted)}
+hr{border:none;border-top:1px solid rgba(255,255,255,.08);margin:12px 0}
+.tag{font-size:12px;opacity:.8}
+.copy{flex:0 0 110px}
+.dest{flex:1 1 320px;min-width:220px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0f1520;color:var(--text)}
+.notice{border-left:4px solid var(--accent);padding:8px 10px;background:#0f1520;border-radius:8px}
+footer{opacity:.7;font-size:12px;text-align:center;margin:18px 0}
+</style>
 </head>
 <body>
-  <h1>HEY KAVA – ワンタップETA</h1>
-  <p>行き先を入れて <b>現在地→目的地</b> のルートを開く。共有用リンクも作るよ。</p>
+<div class="wrap">
+  <h1>HEY KAVA <span class="kpill">ワンタップETA & コピー</span></h1>
 
-  <div class="row">
-    <input id="dest" type="text" placeholder="例：川崎駅／住所／店名" style="flex:1;min-width:220px" />
-    <button id="goBtn">開く</button>
-  </div>
-  <p style="margin:8px 0 0"><small>※ 初回は位置情報の許可を“許可”にしてね。</small></p>
-
-  <div id="linkBox" style="display:none">
-    <div><b>共有リンク</b></div>
-    <div id="gmapsLink"></div>
-    <div id="amapsLink" style="margin-top:8px"></div>
-    <div class="row" style="margin-top:8px">
-      <button id="copyBtn">リンクをコピー</button>
+  <div class="card">
+    <div class="notice small">下の「コピー」ボタンは、文字列やリンクをiPhoneのクリップボードにワンタップで入れます。</div>
+    <div id="destList"></div>
+    <hr/>
+    <div class="row">
+      <a class="btn" id="share">現在地リンクをコピー</a>
+      <a class="btn" id="gmapOpen">現在地→最終タップ宛先を開く</a>
     </div>
+    <div class="small" id="msg">位置情報ONで出発地が正確になります。</div>
   </div>
 
-  <script>
-    const goBtn = document.getElementById('goBtn');
-    const destInput = document.getElementById('dest');
-    const box = document.getElementById('linkBox');
-    const gmapsDiv = document.getElementById('gmapsLink');
-    const amapsDiv = document.getElementById('amapsLink');
-    const copyBtn = document.getElementById('copyBtn');
+  <div class="card">
+    <strong>宛先一覧を一括コピー</strong>
+    <div class="row">
+      <textarea id="bulk" class="dest" rows="6" readonly></textarea>
+      <a class="btn copy" id="copyBulk">一覧をコピー</a>
+    </div>
+    <div class="small">LINEやメモに一括貼り付けできます。</div>
+  </div>
 
-    function enc(s){ return encodeURIComponent(s.trim()); }
+  <div class="card">
+    <strong>使い方</strong>
+    <ul class="small">
+      <li>「コピー」… 宛先文字列（住所/座標）をクリップボードへ。</li>
+      <li>「地図で開く」… Googleマップで <b>現在地→宛先</b> を即起動。</li>
+      <li>「現在地リンクをコピー」… いまの位置を共有できるURLをコピー。</li>
+      <li>宛先の差し替えは下の配列を入れ替えるだけ（変更しないならこのままでOK）。</li>
+    </ul>
+  </div>
 
-    function buildLinks(lat, lng, dest){
-      const origin = `${lat},${lng}`;
-      const gmaps = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${enc(dest)}&travelmode=driving`;
-      const amaps = `http://maps.apple.com/?saddr=${origin}&daddr=${enc(dest)}&dirflg=d`;
-      return { gmaps, amaps };
-    }
+  <footer>© HEY KAVA</footer>
+</div>
 
-    async function copyToClipboard(text){
-      try {
-        await navigator.clipboard.writeText(text);
-        alert('リンクをコピーしました');
-      } catch {
-        alert('コピーできない場合は手動で長押しコピーしてね');
-      }
-    }
+<script>
+/** 宛先プリセット（このまま使える） */
+const DESTS = [
+  {name:"拠点（川崎大師）", value:"川崎区中瀬3丁目4-12"},
+  {name:"SoIeado川崎大師", value:"川崎区中瀬3丁目6-1"},
+  {name:"イル川崎大師", value:"川崎区中瀬3丁目9-4"},
+  {name:"ロアール川崎大師", value:"川崎区中瀬3丁目10-10"},
+  {name:"クレール(3-12-5)", value:"川崎区中瀬3丁目12-5"},
+  {name:"クレール(3-14-11)", value:"川崎区中瀬3丁目14-11"},
+  {name:"サニーハイム", value:"川崎区中瀬3丁目14-8"},
+  {name:"スポットC(座標)", value:"35.5161,139.7334"}
+];
 
-    goBtn.addEventListener('click', () => {
-      const dest = destInput.value;
-      if(!dest.trim()){ alert('行き先を入力してね'); destInput.focus(); return; }
-      if(!navigator.geolocation){ alert('この端末で位置情報が使えません'); return; }
+const $ = (q)=>document.querySelector(q);
+let lastDest = null;
 
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const {latitude, longitude} = pos.coords;
-          const { gmaps, amaps } = buildLinks(latitude, longitude, dest);
+function looksLatLng(s){ return /^\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*$/.test(s); }
+function enc(s){ return looksLatLng(s) ? s.replace(/\s+/g,'') : encodeURIComponent(s); }
 
-          // 端末のデフォルトマップを優先して開く（iPhoneはApple Mapsが既定）
-          window.location.href = amaps;
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); $("#msg").textContent = "コピーしました。"; }
+  catch(e){
+    const ta = document.createElement("textarea");
+    ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+    $("#msg").textContent = "コピーしました。";
+  }
+}
 
-          // 共有用リンクを画面にも表示
-          box.style.display = 'block';
-          gmapsDiv.innerHTML = `<a href="${gmaps}">Google Mapsで開く</a>`;
-          amapsDiv.innerHTML = `<a href="${amaps}">Apple Mapsで開く</a>`;
-          copyBtn.onclick = () => copyToClipboard(amaps + '\n' + gmaps);
-        },
-        (err) => {
-          alert('位置情報が取得できませんでした。設定からSafariの位置情報を許可してね。\n' + err.message);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    });
-  </script>
+function openGmaps(dest){
+  const openUrl = (originParam)=>{
+    const url = `https://www.google.com/maps/dir/?api=1&${originParam}&destination=${enc(dest)}&travelmode=driving`;
+    window.location.href = url;
+  };
+  if (!navigator.geolocation){ openUrl(""); return; }
+  navigator.geolocation.getCurrentPosition(
+    (pos)=> openUrl(`origin=${pos.coords.latitude},${pos.coords.longitude}`),
+    ()=> openUrl(""),
+    {enableHighAccuracy:true, timeout:6000, maximumAge:0}
+  );
+}
+
+function makeRow(item){
+  const row = document.createElement("div");
+  row.className = "card";
+  row.innerHTML = `
+    <div class="row">
+      <div class="dest" style="display:flex;align-items:center;gap:10px;">
+        <div style="flex:1 1 auto;">
+          <div><strong>${item.name}</strong></div>
+          <div class="tag">${item.value}</div>
+        </div>
+      </div>
+      <a class="btn copy" data-copy="${item.value}">コピー</a>
+      <a class="btn" data-go="${item.value}">地図で開く</a>
+    </div>
+  `;
+  row.querySelector("[data-copy]").onclick = ()=> copyText(item.value);
+  row.querySelector("[data-go]").onclick = ()=> { lastDest = item.value; openGmaps(item.value); };
+  return row;
+}
+
+function render(){
+  const list = $("#destList");
+  list.innerHTML = "";
+  DESTS.forEach(d=> list.appendChild(makeRow(d)));
+  $("#bulk").value = DESTS.map(d=> `${d.name}：${d.value}`).join("\n");
+}
+render();
+
+$("#copyBulk").onclick = ()=> copyText($("#bulk").value);
+
+$("#share").onclick = ()=>{
+  if (!navigator.geolocation){ alert("位置情報が使えません"); return; }
+  navigator.geolocation.getCurrentPosition(
+    (pos)=> copyText(`https://www.google.com/maps/search/?api=1&query=${pos.coords.latitude},${pos.coords.longitude}`),
+    ()=> alert("現在地取得に失敗しました"),
+    {enableHighAccuracy:true, timeout:6000}
+  );
+};
+
+$("#gmapOpen").onclick = ()=>{
+  if (!lastDest){ $("#msg").textContent = "まず上の宛先の「地図で開く」を一度タップしてください。"; return; }
+  openGmaps(lastDest);
+};
+</script>
 </body>
 </html>
